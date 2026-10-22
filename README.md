@@ -58,4 +58,4 @@ Pushes to the main branch auto-deploy on [Render](https://render.com).
 
 ---
 
-<p align="center">© 2026 Bulacan State University – Meneses Campus</p>
+<p align="center">© 2026 Achxea</p>
