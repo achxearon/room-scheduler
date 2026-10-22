@@ -1,21 +1,21 @@
 const express = require('express');
 const session = require('express-session');
-const cors = require('cors');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 const app = express();
 
-app.use(cors({
-    origin: ['http://127.0.0.1:5500', 'http://localhost:5500'],
-    credentials: true
-}));
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(session({
-    secret: 'change-this-secret',
+    secret: process.env.SESSION_SECRET || 'change-this-secret',
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    cookie: { sameSite: 'lax', secure: 'auto' }
 }));
+app.use(express.static(path.join(__dirname, 'frontend')));
+app.get('/', (req, res) => res.redirect('/login.html'));
 
 const requireLogin = (req, res, next) =>
 req.session.user ? next() : res.status(401).json({ error: 'Login required' });
@@ -209,4 +209,5 @@ function decide(status) {
 app.put('/api/requests/:id/approve', requireLogin, requireRole('professor'), decide('approved'));
 app.put('/api/requests/:id/reject', requireLogin, requireRole('professor'), decide('rejected'));
 
-app.listen(3000, '0.0.0.0', () => console.log('API on http://localhost:3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => console.log('Running on port ' + PORT));
