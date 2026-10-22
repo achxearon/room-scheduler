@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Room Scheduling</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="auth">
+    <aside class="auth-art">
+      <h2>Room Scheduling</h2>
+      <div class="tag">Bulacan State University - Meneses Campus</div>
+    </aside>
+
+    <section class="auth-main">
+      <div class="auth-brand">Room Scheduling</div>
+
+      <div class="auth-form">
+        <h1>Sign in</h1>
+        <p class="lede">Use your university email and password.</p>
+
+        <label class="field">
+          <span>University email</span>
+          <input id="email" class="ctl" type="email" autocomplete="username" placeholder="you@example.com">
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <div class="pw">
+            <input id="password" class="ctl" type="password" autocomplete="current-password" placeholder="Enter your password">
+            <button type="button" id="toggle" aria-label="Show password"></button>
+          </div>
+        </label>
+
+        <button class="btn btn-primary btn-lg" onclick="login()">Sign in <span id="go"></span></button>
+        <p id="msg" class="msg" role="alert"></p>
+      </div>
+
+      <div class="auth-foot">© 2026 Bulacan State University - Meneses Campus</div>
+    </section>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    document.getElementById('toggle').innerHTML = ico('eye');
+    document.getElementById('go').innerHTML = ico('arrow');
+    document.getElementById('toggle').addEventListener('click', () => {
+      const p = document.getElementById('password');
+      p.type = p.type === 'password' ? 'text' : 'password';
+    });
+
+    async function login() {
+      try {
+        await api('/login', 'POST', {
+          email: document.getElementById('email').value,
+          password: document.getElementById('password').value
+        });
+        location.href = 'schedule.html';
+      } catch (e) {
+        document.getElementById('msg').textContent = e.message;
+      }
+    }
+    document.getElementById('password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') login();
+    });
+  </script>
+</body>
+</html>

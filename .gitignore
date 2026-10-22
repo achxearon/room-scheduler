@@ -1,0 +1,6 @@
+node_modules/
+*.db
+*.db.bak
+*.db.before-reset
+c.txt
+s.txt

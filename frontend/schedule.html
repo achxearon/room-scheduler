@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rooms · Room Scheduling</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="nav" class="nav"></div>
+
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <h1>Room availability</h1>
+        <p class="lede">Select a day and time to see which rooms are free.</p>
+        <p class="stats" id="stats"></p>
+      </div>
+      <img class="hero-img" src="img/hero.jpg" alt="Campus building">
+    </section>
+
+    <div class="filters">
+      <label class="search">
+        <span id="searchIcon"></span>
+        <input id="search" class="ctl" placeholder="Search rooms or buildings" oninput="renderRooms()">
+      </label>
+      <select id="fAvail" class="ctl f-avail" onchange="renderRooms()">
+        <option value="">All availability</option>
+        <option value="free">Available</option>
+        <option value="busy">Occupied</option>
+        <option value="maint">Under maintenance</option>
+      </select>
+
+      <div class="right">
+        <div class="daynav">
+          <button class="iconbtn" id="prevDay" aria-label="Previous day" onclick="shiftDay(-1)"></button>
+          <select id="fDay" class="ctl" onchange="refresh()"></select>
+          <button class="iconbtn" id="nextDay" aria-label="Next day" onclick="shiftDay(1)"></button>
+        </div>
+        <div class="timebox">
+          <input id="fStart" type="time" value="09:00" onchange="refresh()">
+          <span>to</span>
+          <input id="fEnd" type="time" value="10:30" onchange="refresh()">
+        </div>
+      </div>
+    </div>
+    <p id="timeMsg" class="msg" style="margin:-20px 0 20px"></p>
+
+    <div class="sec-head">
+      <h2>All spaces</h2>
+      <span class="count" id="count"></span>
+      <div class="legend">
+        <span><i class="dot"></i>Available</span>
+        <span><i class="dot busy"></i>Occupied</span>
+      </div>
+    </div>
+
+    <div class="layout" id="layout">
+      <div class="rooms" id="grid"></div>
+
+      <aside id="aside" hidden>
+        <section class="panel">
+          <h2>Schedule a class</h2>
+          <p class="sub">Select a room, then enter the class details.</p>
+
+          <label class="field"><span>Room</span><select id="aRoom" class="ctl ctl-accent" onchange="pickFromSelect()"></select></label>
+          <label class="field"><span>Course / class</span><input id="aSubject" class="ctl" placeholder="e.g. IT 101 – Intro to Computing"></label>
+          <label class="field"><span>Day</span><select id="aDay" class="ctl"></select></label>
+          <div class="two">
+            <label class="field"><span>Start time</span><input id="aStart" type="time" class="ctl" value="09:00"></label>
+            <label class="field"><span>End time</span><input id="aEnd" type="time" class="ctl" value="10:30"></label>
+          </div>
+          <button class="btn btn-primary btn-block btn-tall" onclick="addSchedule()">Add schedule <span id="addIcon"></span></button>
+          <p id="addMsg" class="msg"></p>
+        </section>
+
+        <section class="later" id="later" hidden>
+          <h3 id="laterTitle"></h3>
+          <p class="date" id="laterDay"></p>
+          <ul id="laterList"></ul>
+        </section>
+      </aside>
+    </div>
+
+    <section class="block">
+      <div class="block-head">
+        <h2 id="tableTitle">Class schedule</h2>
+        <select id="tRoom" class="ctl" onchange="loadSchedules()"></select>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Room</th><th>Subject</th><th>Professor</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap"><div class="site-foot">© 2026 Bulacan State University - Meneses Campus</div></footer>
+
+  <script src="config.js"></script>
+  <script>
+    const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    let user, rooms = [], freeIds = new Set(), pickedId = null;
+
+    const $ = (id) => document.getElementById(id);
+    const opts = (items, valueFn, labelFn) =>
+      items.map((i) => `<option value="${esc(valueFn(i))}">${esc(labelFn(i))}</option>`).join('');
+    const isProf = () => user && user.role === 'professor';
+    const sel = () => ({ day: $('fDay').value, start: $('fStart').value, end: $('fEnd').value });
+
+    // Re-check which rooms are free for the chosen day/time, then redraw
+    async function refresh() {
+      const { day, start, end } = sel();
+      $('timeMsg').textContent = '';
+      let unknown = false;
+      try {
+        const free = await api('/rooms/free?' + new URLSearchParams({ day, start, end }));
+        freeIds = new Set(free.map((r) => r.id));
+      } catch (e) {
+        freeIds = new Set();
+        unknown = true;
+        $('timeMsg').textContent = e.message;
+      }
+      renderRooms(unknown);
+      loadSchedules();
+      loadLater();
+    }
+
+    function shiftDay(step) {
+      const i = DAYS.indexOf($('fDay').value);
+      $('fDay').value = DAYS[(i + step + DAYS.length) % DAYS.length];
+      refresh();
+    }
+
+    let lastUnknown = false;
+    function renderRooms(unknown = lastUnknown) {
+      lastUnknown = unknown;
+      const { day, start, end } = sel();
+      const q = $('search').value.trim().toLowerCase();
+      const av = $('fAvail').value;
+
+      const isMaint = (r) => r.status === 'maintenance';
+      const list = rooms.filter((r) => {
+        if (q && !`${r.name} ${r.building || ''}`.toLowerCase().includes(q)) return false;
+        if (av === 'maint') return isMaint(r);
+        if (!unknown && av === 'free' && !freeIds.has(r.id)) return false;
+        if (!unknown && av === 'busy' && (freeIds.has(r.id) || isMaint(r))) return false;
+        return true;
+      });
+
+      const nFree = rooms.filter((r) => freeIds.has(r.id)).length;
+      const nMaint = rooms.filter(isMaint).length;
+      $('stats').innerHTML = unknown
+        ? `<strong>${rooms.length} spaces</strong>`
+        : `<strong>${rooms.length} spaces</strong><span class="sep">/</span>
+           <span class="good">${nFree} available for your time</span>
+           <span>${rooms.length - nFree - nMaint} occupied</span>
+           ${nMaint ? `<span>${nMaint} under maintenance</span>` : ''}`;
+      $('count').textContent = `${list.length} ${list.length === 1 ? 'room' : 'rooms'}`;
+
+      const cards = list.map((r) => {
+        if (isMaint(r)) {
+          return `
+          <article class="room is-maint">
+            <div class="room-top">${ico('board')}<span class="badge badge-maint">Under maintenance</span></div>
+            <h3>${esc(r.name)}</h3>
+            <p class="meta">${esc(r.building || '')}</p>
+            <p class="note">Temporarily closed for repairs</p>
+            <div class="foot"><button class="btn btn-block" disabled>Scheduling unavailable</button></div>
+          </article>`;
+        }
+        const free = freeIds.has(r.id);
+        const picked = isProf() && pickedId === r.id;
+        const meta = [r.building, r.capacity ? `${r.capacity} seats` : ''].filter(Boolean).map(esc).join(' · ');
+        const badge = unknown ? '' :
+          free ? '<span class="badge badge-ok">Available</span>' : '<span class="badge badge-busy">Occupied</span>';
+        const note = unknown ? '' :
+          `<p class="note">${ico('clock')}${free
+            ? `Free ${esc(start)} - ${esc(end)}`
+            : `Booked between ${esc(start)} and ${esc(end)}`}</p>`;
+
+        let action;
+        if (!unknown && !free) {
+          action = `<button class="btn btn-block" onclick="viewRoom(${r.id})">View schedule ${ico('out')}</button>`;
+        } else if (isProf()) {
+          action = `<button class="btn btn-block ${picked ? 'btn-primary' : ''}" onclick="pick(${r.id})">Schedule class ${ico('arrow')}</button>`;
+        } else {
+          const qs = new URLSearchParams({ room: r.id, day, start, end });
+          action = `<a class="btn btn-block" href="requests.html?${qs}">Request room ${ico('arrow')}</a>`;
+        }
+        return `
+          <article class="room ${picked ? 'is-picked' : ''}">
+            <div class="room-top">${ico('board')}${badge}</div>
+            <h3>${esc(r.name)}</h3>
+            <p class="meta">${meta}</p>
+            ${note}
+            <div class="foot">${action}</div>
+          </article>`;
+      }).join('');
+
+      $('grid').innerHTML = (cards || '<div class="empty-grid">No rooms match your search.</div>') + `
+`;
+    }
+
+    // Professors: choose a room card -> fills the side panel
+    function pick(id) {
+      pickedId = id;
+      const { day, start, end } = sel();
+      $('aRoom').value = id;
+      $('aDay').value = day;
+      $('aStart').value = start;
+      $('aEnd').value = end;
+      renderRooms();
+      loadLater();
+    }
+    function pickFromSelect() { pick(Number($('aRoom').value)); }
+
+    // "View schedule" on an occupied room: filter the table below and jump to it
+    function viewRoom(id) {
+      $('tRoom').value = id;
+      if (isProf()) { pickedId = id; renderRooms(); loadLater(); }
+      loadSchedules();
+      $('tableTitle').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function loadSchedules() {
+      const params = new URLSearchParams({ day: $('fDay').value });
+      if ($('tRoom').value) params.set('room_id', $('tRoom').value);
+      const list = await api('/schedules?' + params);
+      $('tableTitle').textContent = `Class schedule · ${$('fDay').value}`;
+      $('rows').innerHTML = list.map((s) => `
+        <tr>
+          <td>${esc(s.start_time)} - ${esc(s.end_time)}</td>
+          <td>${esc(s.room_name)}</td>
+          <td>${esc(s.subject)}</td>
+          <td>${esc(s.professor_name)}</td>
+          <td class="actions">${isProf() && s.professor_id === user.id
+            ? `<button class="btn btn-sm" onclick="delSchedule(${s.id})">Delete</button>` : ''}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="empty">No classes scheduled for this selection.</td></tr>';
+    }
+
+    // Side card: the picked room's classes for the chosen day
+    async function loadLater() {
+      if (!isProf() || !pickedId) { $('later').hidden = true; return; }
+      const room = rooms.find((r) => r.id === pickedId);
+      const day = $('fDay').value;
+      const list = await api('/schedules?' + new URLSearchParams({ day, room_id: pickedId }));
+      $('later').hidden = false;
+      $('laterTitle').textContent = room ? room.name : 'Room';
+      $('laterDay').textContent = day;
+      $('laterList').innerHTML = list.map((s) => `
+        <li><span class="t">${esc(s.start_time)} - ${esc(s.end_time)}</span>
+            <span class="s">${esc(s.subject)}</span>
+            <span class="t">${esc(s.professor_name)}</span></li>`).join('')
+        || '<li class="empty">No classes scheduled that day.</li>';
+    }
+
+    async function addSchedule() {
+      try {
+        await api('/schedules', 'POST', {
+          room_id: Number($('aRoom').value),
+          subject: $('aSubject').value,
+          day: $('aDay').value,
+          start_time: $('aStart').value,
+          end_time: $('aEnd').value
+        });
+        $('addMsg').textContent = '';
+        $('aSubject').value = '';
+        refresh();
+      } catch (e) {
+        $('addMsg').textContent = e.message;
+      }
+    }
+
+    async function delSchedule(id) {
+      if (!confirm('Delete this schedule?')) return;
+      try {
+        await api('/schedules/' + id, 'DELETE');
+        refresh();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    (async () => {
+      user = await initPage();
+      if (!user) return;
+      rooms = await api('/rooms');
+
+      $('searchIcon').innerHTML = ico('search');
+      $('prevDay').innerHTML = ico('left');
+      $('nextDay').innerHTML = ico('right');
+      $('addIcon').innerHTML = ico('arrow');
+
+      $('fDay').innerHTML = opts(DAYS, (d) => d, (d) => d);
+      $('fDay').value = DAYS[(new Date().getDay() + 6) % 7];
+      $('tRoom').innerHTML = '<option value="">All rooms</option>' + opts(rooms, (r) => r.id, (r) => r.name);
+
+      if (isProf()) {
+        $('layout').classList.add('has-panel');
+        $('aside').hidden = false;
+        $('aRoom').innerHTML = opts(rooms.filter((r) => r.status !== 'maintenance'), (r) => r.id, (r) => r.name);
+        $('aDay').innerHTML = opts(DAYS, (d) => d, (d) => d);
+        $('aDay').value = $('fDay').value;
+      }
+      refresh();
+    })();
+  </script>
+</body>
+</html>

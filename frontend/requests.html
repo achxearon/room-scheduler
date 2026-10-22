@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Requests · Room Scheduling</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="nav" class="nav"></div>
+
+  <main class="wrap">
+    <header class="page-head">
+      <h1 id="title">Requests</h1>
+      <p id="sub"></p>
+    </header>
+
+    <section id="formBox" class="panel" hidden style="margin-bottom:40px">
+      <h2>Request a room</h2>
+      <p class="sub">Requests are reviewed by a professor.</p>
+      <div class="two" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <label class="field"><span>Room</span><select id="qRoom" class="ctl"></select></label>
+        <label class="field"><span>Day</span><select id="qDay" class="ctl"></select></label>
+        <label class="field"><span>Start time</span><input id="qStart" type="time" class="ctl" value="09:00"></label>
+        <label class="field"><span>End time</span><input id="qEnd" type="time" class="ctl" value="10:30"></label>
+      </div>
+      <label class="field"><span>Purpose</span><input id="qPurpose" class="ctl" placeholder="What will you use the room for?"></label>
+      <button class="btn btn-primary btn-tall" style="width:220px;justify-content:space-between" onclick="sendRequest()">Send request <span id="sendIcon"></span></button>
+      <p id="qMsg" class="msg"></p>
+    </section>
+
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr><th>Student</th><th>Room</th><th>Day</th><th>Time</th><th>Purpose</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer class="wrap"><div class="site-foot">© 2026 Bulacan State University - Meneses Campus</div></footer>
+
+  <script src="config.js"></script>
+  <script>
+    const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    let user;
+    const $ = (id) => document.getElementById(id);
+    const opts = (items, valueFn, labelFn) =>
+      items.map((i) => `<option value="${esc(valueFn(i))}">${esc(labelFn(i))}</option>`).join('');
+
+    async function loadRequests() {
+      const list = await api('/requests');
+      $('rows').innerHTML = list.map((q) => {
+        let actions = '';
+        if (q.status === 'pending' && user.role === 'professor') {
+          actions = `<button class="btn btn-sm btn-primary" onclick="decide(${q.id}, 'approve')">Approve</button>
+                     <button class="btn btn-sm" onclick="decide(${q.id}, 'reject')">Reject</button>`;
+        } else if (q.status === 'pending' && user.role === 'student') {
+          actions = `<button class="btn btn-sm" onclick="cancelReq(${q.id})">Cancel</button>`;
+        }
+        return `
+          <tr>
+            <td>${esc(q.student_name)}</td>
+            <td>${esc(q.room_name)}</td>
+            <td>${esc(q.day)}</td>
+            <td>${esc(q.start_time)} - ${esc(q.end_time)}</td>
+            <td>${esc(q.purpose)}</td>
+            <td><span class="badge status-${esc(q.status)}">${esc(q.status)}</span></td>
+            <td class="actions">${actions}</td>
+          </tr>`;
+      }).join('') || '<tr><td colspan="7" class="empty">No requests yet.</td></tr>';
+    }
+
+    async function sendRequest() {
+      try {
+        await api('/requests', 'POST', {
+          room_id: Number($('qRoom').value),
+          day: $('qDay').value,
+          start_time: $('qStart').value,
+          end_time: $('qEnd').value,
+          purpose: $('qPurpose').value
+        });
+        $('qMsg').textContent = '';
+        $('qPurpose').value = '';
+        loadRequests();
+      } catch (e) {
+        $('qMsg').textContent = e.message;
+      }
+    }
+
+    async function decide(id, action) {
+      try {
+        await api(`/requests/${id}/${action}`, 'PUT');
+        loadRequests();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function cancelReq(id) {
+      if (!confirm('Cancel this request?')) return;
+      try {
+        await api('/requests/' + id, 'DELETE');
+        loadRequests();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    (async () => {
+      user = await initPage();
+      if (!user) return;
+      if (user.role === 'student') {
+        const rooms = await api('/rooms');
+        $('qRoom').innerHTML = opts(rooms.filter((r) => r.status !== 'maintenance'), (r) => r.id, (r) => r.name);
+        $('qDay').innerHTML = opts(DAYS, (d) => d, (d) => d);
+        $('sendIcon').innerHTML = ico('arrow');
+
+        // Prefill from a room card on the Rooms page
+        const p = new URLSearchParams(location.search);
+        if (p.get('room')) $('qRoom').value = p.get('room');
+        if (DAYS.includes(p.get('day'))) $('qDay').value = p.get('day');
+        if (p.get('start')) $('qStart').value = p.get('start');
+        if (p.get('end')) $('qEnd').value = p.get('end');
+
+        $('formBox').hidden = false;
+        $('title').textContent = 'My requests';
+        $('sub').textContent = 'Status of your room requests.';
+      } else {
+        $('title').textContent = 'Student requests';
+        $('sub').textContent = 'Approve or reject room requests from students.';
+      }
+      loadRequests();
+    })();
+  </script>
+</body>
+</html>
